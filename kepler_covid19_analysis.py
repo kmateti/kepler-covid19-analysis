@@ -6,8 +6,7 @@ import math
 import numpy as np
 import glob
 import os
-import difflib
-#from keplergl import KeplerGl
+from keplergl import KeplerGl
 
 
 # Clone https://github.com/CSSEGISandData/COVID-19 in same parent folder
@@ -20,14 +19,19 @@ sqmi_to_sqkm = 2.5899752356 #1.60934*1.60934
 
 def get_us_covid19_data():
     # Read the latest COVID-19 data, where 'Admin2' is County data    
-    all_data = glob.glob(os.path.join(jhu_data_dir, '*.csv'))
+    all_data = sorted(glob.glob(os.path.join(jhu_data_dir, '*.csv')))
     latest_data = all_data[-1]
-    df = pd.read_csv(latest_data);
+    df = pd.read_csv(latest_data)
     
+    # So Country 'slash' Region can cause issues
+    try:
+        country_region = df['Country_Region']
+    except KeyError as key_error:
+        country_region = df['Country/Region']
+
     # Focus on US right now
     # Drop any data where Admin2 is nanpoints like the Diamond Princess
-    covid_df = df.loc[df['Country_Region'] == 'US', :].dropna()
-
+    covid_df = df.loc[df.index[country_region.str.find('US') != 1]].dropna()
     return covid_df
     
 
@@ -47,7 +51,7 @@ def append_pop_density(covid_df):
         
         if isinstance(county, str):
             state_df = df.loc[state_bool_idx, :]
-            county_idx = state_df['Area'].str.find(county) != -1
+            county_idx = state_df.index[state_df['Area'].str.find(county) != -1]
             
             if any(county_idx):
                 pop_density_sq_miles = state_df.loc[county_idx, 'Density_persons_per_square_mile']\
@@ -61,23 +65,29 @@ def append_pop_density(covid_df):
             print('Did not find {0}'.format(covid_df.iloc[ii]['Admin2']))
         
     covid_df['Density_persons_per_square_km'] = pd.Series(pop_density_array.transpose(), name='Density_persons_per_square_km')
+    covid_df['Confirmed_per_capita'] = covid_df['Confirmed']/covid_df['Density_persons_per_square_km']
+    covid_df['Deaths_per_capita'] = covid_df['Deaths']/covid_df['Density_persons_per_square_km']
+    covid_df['Recovered_per_capita'] = covid_df['Recovered']/covid_df['Density_persons_per_square_km']
+    covid_df['Active_per_capita'] = covid_df['Active']/covid_df['Density_persons_per_square_km']
     return covid_df
     
 
 if __name__ == "__main__": 
 
     # Read the COVID-19 data    
-    covid_usa_df = get_us_covid19_data();
+    covid_usa_df = get_us_covid19_data()
     
     # Append US county population density data
-    covid_w_popdensity = append_pop_density(covid_usa_df)
+    df = append_pop_density(covid_usa_df)
     
-    # display_df = pd.DataFrame({'Province-County': df['Admin2'], 'Latitude' : df['Lat'], 'Longitude': df['Long_'],
-    #                'Confirmed': df['Confirmed'], 'Deaths': df['Deaths'], 
-    #                'Recovered': df['Recovered'],'Active': df['Active']
-    #               })
-
-    # Load an empty map
-    # map_1 = KeplerGl()
-    # map_1.add_data(data=display_df)
-    # map_1.save_to_html()
+    display_df = pd.DataFrame({'County': df['Admin2'], 'Latitude' : df['Lat'], 'Longitude': df['Long_'],
+                   'Confirmed': df['Confirmed'], 'Deaths': df['Deaths'], 
+                   'Recovered': df['Recovered'],'Active': df['Active'],
+                   'Confirmed_per_capita': df['Confirmed_per_capita'], 'Deaths_per_capita': df['Deaths_per_capita'], 
+                   'Recovered_per_capita': df['Recovered_per_capita'],'Active_per_capita': df['Active_per_capita'],
+                  })
+    
+    # Create the kepler map with the displayed data frame
+    map_1 = KeplerGl()
+    map_1.add_data(data=display_df)
+    map_1.save_to_html(file_name='kepler_covid19_per_capita.html')
